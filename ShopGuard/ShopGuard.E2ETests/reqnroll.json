@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schemas.reqnroll.net/reqnroll-config-latest.json",
+  "bindingAssemblies": [],
+  "runtime": {
+    "missingOrPendingStepsOutcome": "Error"
+  },
+  "trace": {
+    "stepDefinitionSkeletonStyle": "CucumberExpressionAttribute"
+  }
+}

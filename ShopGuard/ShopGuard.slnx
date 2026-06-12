@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ShopGuard.Core/ShopGuard.Core.csproj" />
+  <Project Path="ShopGuard.E2ETests/ShopGuard.E2ETests.csproj" />
+  <Project Path="ShopGuard.UnitTests/ShopGuard.UnitTests.csproj" />
+</Solution>

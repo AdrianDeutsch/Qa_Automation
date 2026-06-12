@@ -1,0 +1,26 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+.idea/
+
+# Test output
+TestResults/
+coverage/
+artifacts/
+*.trx
+*.db
+
+# NuGet
+.nuget/
+*.nupkg
+
+# Node / Playwright TS
+node_modules/
+playwright-report/
+test-results/
+.playwright/
+
+# OS
+.DS_Store

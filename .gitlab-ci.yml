@@ -1,0 +1,128 @@
+# ShopGuard CI/CD pipeline
+#
+# Stage order implements the test pyramid as fail-fast chain:
+#   build -> unit (fast, blocks everything) -> smoke (max 5 min) -> feature (MR) -> regression (nightly) -> report
+#
+# Test selection is tag-based via Reqnroll tags mapped to NUnit categories:
+#   @smoke / @ui / @api / @db / @regression  ->  --filter "TestCategory=..."
+
+stages: [build, unit, smoke, feature, regression, report]
+
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  NUGET_PACKAGES: "$CI_PROJECT_DIR/.nuget"
+  HEADLESS: "true"
+  SHOPGUARD_ENV: "local"
+
+default:
+  image: mcr.microsoft.com/dotnet/sdk:10.0
+  cache:
+    key:
+      files: [ShopGuard/ShopGuard.sln]
+    paths: [.nuget]
+
+# Reusable script block: installs Playwright browsers incl. OS dependencies.
+.install-playwright: &install-playwright
+  - dotnet tool install --global Microsoft.Playwright.CLI
+  - export PATH="$PATH:$HOME/.dotnet/tools"
+  - playwright install --with-deps chromium
+
+# Reusable artifact definition for E2E jobs: screenshots, traces and JUnit results.
+.e2e-artifacts: &e2e-artifacts
+  when: always
+  expire_in: 1 week
+  paths:
+    - ShopGuard/ShopGuard.E2ETests/bin/Release/net10.0/artifacts/
+    - ShopGuard/TestResults/
+  reports:
+    junit: ShopGuard/TestResults/*.junit.xml
+
+build:
+  stage: build
+  script:
+    - dotnet build ShopGuard -c Release
+
+unit:
+  stage: unit
+  # Fail fast: if unit tests are red, no browser is ever started.
+  script:
+    - dotnet test ShopGuard/ShopGuard.UnitTests -c Release
+        --collect:"XPlat Code Coverage"
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/unit.junit.xml"
+        --results-directory ShopGuard/TestResults
+    - dotnet tool install --global dotnet-reportgenerator-globaltool
+    - export PATH="$PATH:$HOME/.dotnet/tools"
+    - reportgenerator
+        -reports:"ShopGuard/TestResults/**/coverage.cobertura.xml"
+        -targetdir:coverage
+        -reporttypes:"Html;TextSummary;Cobertura"
+        -assemblyfilters:"+ShopGuard.Core"
+    - cat coverage/Summary.txt
+  coverage: '/Line coverage: \d+\.?\d*%/'
+  artifacts:
+    when: always
+    expire_in: 1 week
+    paths: [coverage/]
+    reports:
+      junit: ShopGuard/TestResults/unit.junit.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/Cobertura.xml
+
+smoke:
+  stage: smoke
+  timeout: 5 minutes
+  retry:
+    max: 2
+    when: [script_failure, runner_system_failure]
+  before_script:
+    - *install-playwright
+  script:
+    - dotnet test ShopGuard/ShopGuard.E2ETests -c Release
+        --filter "TestCategory=smoke"
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/smoke.junit.xml"
+  artifacts: *e2e-artifacts
+
+feature:
+  stage: feature
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  retry:
+    max: 2
+    when: [script_failure, runner_system_failure]
+  before_script:
+    - *install-playwright
+  script:
+    - dotnet test ShopGuard/ShopGuard.E2ETests -c Release
+        --filter "TestCategory=ui|TestCategory=api|TestCategory=db"
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/feature.junit.xml"
+  artifacts: *e2e-artifacts
+
+regression:
+  stage: regression
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  retry:
+    max: 2
+    when: [script_failure, runner_system_failure]
+  before_script:
+    - *install-playwright
+  script:
+    # Nightly: the complete test set without any tag filter.
+    - dotnet test ShopGuard -c Release
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/regression.junit.xml"
+  artifacts: *e2e-artifacts
+
+# Publishes the coverage report (and any E2E artifacts) as GitLab Pages.
+pages:
+  stage: report
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  needs: [unit]
+  script:
+    - mkdir -p public
+    - cp -r coverage/* public/ || echo "no coverage report found"
+  artifacts:
+    paths: [public]
