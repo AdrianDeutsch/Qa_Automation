@@ -1,0 +1,165 @@
+name: CI
+
+# Mirrors the GitLab pipeline (.gitlab-ci.yml) as GitHub Actions jobs.
+# Fail-fast test pyramid: unit (always, blocks everything) -> smoke (push) ->
+# e2e (pull request) -> regression (nightly schedule).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 2 * * *" # nightly 02:00 UTC -> full regression
+  workflow_dispatch:
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  HEADLESS: "true"
+  SHOPGUARD_ENV: "local"
+
+jobs:
+  # Fast feedback: unit tests + coverage. If this is red, no browser is ever started.
+  unit:
+    name: Unit & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build
+        run: dotnet build ShopGuard -c Release
+      - name: Unit tests + coverage
+        run: |
+          dotnet test ShopGuard/ShopGuard.UnitTests -c Release --no-build \
+            --collect:"XPlat Code Coverage" \
+            --logger "junit;LogFilePath=$GITHUB_WORKSPACE/TestResults/unit.junit.xml" \
+            --results-directory TestResults
+      - name: Coverage report
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          reportgenerator \
+            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -targetdir:coverage \
+            -reporttypes:"Html;TextSummary;MarkdownSummaryGithub" \
+            -assemblyfilters:"+ShopGuard.Core"
+          cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          echo "### Coverage (ShopGuard.Core)" && grep -E "Line coverage|Branch coverage" coverage/Summary.txt
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # Smoke suite on every push, kept short via the @smoke tag.
+  smoke:
+    name: Smoke (@smoke)
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build
+        run: dotnet build ShopGuard/ShopGuard.E2ETests -c Release
+      - name: Install Playwright (Chromium)
+        run: |
+          dotnet tool install --global Microsoft.Playwright.CLI
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          playwright install --with-deps chromium
+      - name: Smoke tests
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          # Live demo sites can be flaky; retry the suite up to 3 times before failing.
+          for attempt in 1 2 3; do
+            echo "::group::Attempt $attempt" && \
+            dotnet test ShopGuard/ShopGuard.E2ETests -c Release --no-build \
+              --filter "TestCategory=smoke" \
+              --logger "junit;LogFilePath=$GITHUB_WORKSPACE/TestResults/smoke.junit.xml" \
+              && { echo "::endgroup::"; exit 0; }
+            echo "::endgroup::"; echo "attempt $attempt failed"
+          done
+          exit 1
+      - name: Upload artifacts (screenshots, traces)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-artifacts
+          path: |
+            ShopGuard/ShopGuard.E2ETests/bin/Release/net10.0/artifacts/
+            TestResults/
+
+  # Full UI + API + DB suite on pull requests (maps to the GitLab "feature" stage).
+  e2e:
+    name: E2E (ui|api|db)
+    needs: unit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build
+        run: dotnet build ShopGuard/ShopGuard.E2ETests -c Release
+      - name: Install Playwright (Chromium)
+        run: |
+          dotnet tool install --global Microsoft.Playwright.CLI
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          playwright install --with-deps chromium
+      - name: E2E tests
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          for attempt in 1 2 3; do
+            dotnet test ShopGuard/ShopGuard.E2ETests -c Release --no-build \
+              --filter "TestCategory=ui|TestCategory=api|TestCategory=db" \
+              --logger "junit;LogFilePath=$GITHUB_WORKSPACE/TestResults/e2e.junit.xml" \
+              && exit 0
+            echo "attempt $attempt failed"
+          done
+          exit 1
+      - name: Upload artifacts (screenshots, traces)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-artifacts
+          path: |
+            ShopGuard/ShopGuard.E2ETests/bin/Release/net10.0/artifacts/
+            TestResults/
+
+  # Complete test set nightly (maps to the GitLab "regression" stage).
+  regression:
+    name: Regression (full)
+    needs: unit
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Build
+        run: dotnet build ShopGuard -c Release
+      - name: Install Playwright (Chromium)
+        run: |
+          dotnet tool install --global Microsoft.Playwright.CLI
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          playwright install --with-deps chromium
+      - name: Full suite
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet test ShopGuard -c Release \
+            --logger "junit;LogFilePath=$GITHUB_WORKSPACE/TestResults/regression.junit.xml"
+      - name: Upload artifacts (screenshots, traces)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-artifacts
+          path: |
+            ShopGuard/ShopGuard.E2ETests/bin/Release/net10.0/artifacts/
+            TestResults/
