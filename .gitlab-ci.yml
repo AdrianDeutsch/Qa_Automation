@@ -5,6 +5,11 @@
 #
 # Test selection is tag-based via Reqnroll tags mapped to NUnit categories:
 #   @smoke / @ui / @api / @db / @regression  ->  --filter "TestCategory=..."
+#
+# The public demo shop is behind a Cloudflare bot challenge that blocks shared/
+# data-center runner IPs. The @ui scenarios therefore run in a dedicated job on a
+# self-hosted runner (tag: residential); the shared-runner stages exclude them via
+# "TestCategory!=ui".
 
 stages: [build, unit, smoke, feature, regression, report]
 
@@ -73,20 +78,20 @@ unit:
         coverage_format: cobertura
         path: coverage/Cobertura.xml
 
+# API smoke on every push (UI smoke runs in the self-hosted "ui" job below).
 smoke:
   stage: smoke
   timeout: 5 minutes
   retry:
     max: 2
     when: [script_failure, runner_system_failure]
-  before_script:
-    - *install-playwright
   script:
     - dotnet test ShopGuard/ShopGuard.E2ETests -c Release
-        --filter "TestCategory=smoke"
+        --filter "TestCategory=smoke&TestCategory!=ui"
         --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/smoke.junit.xml"
   artifacts: *e2e-artifacts
 
+# API + DB on merge requests (shared runners, no browser needed).
 feature:
   stage: feature
   rules:
@@ -94,12 +99,28 @@ feature:
   retry:
     max: 2
     when: [script_failure, runner_system_failure]
+  script:
+    - dotnet test ShopGuard/ShopGuard.E2ETests -c Release
+        --filter "TestCategory=api|TestCategory=db"
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/feature.junit.xml"
+  artifacts: *e2e-artifacts
+
+# UI E2E on a self-hosted runner with a residential egress IP (avoids the
+# Cloudflare bot challenge). allow_failure keeps the demo-site flakiness from
+# blocking merges; run on MRs and the nightly schedule.
+ui:
+  stage: feature
+  tags: [residential]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  allow_failure: true
   before_script:
     - *install-playwright
   script:
     - dotnet test ShopGuard/ShopGuard.E2ETests -c Release
-        --filter "TestCategory=ui|TestCategory=api|TestCategory=db"
-        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/feature.junit.xml"
+        --filter "TestCategory=ui"
+        --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/ui.junit.xml"
   artifacts: *e2e-artifacts
 
 regression:
@@ -109,11 +130,11 @@ regression:
   retry:
     max: 2
     when: [script_failure, runner_system_failure]
-  before_script:
-    - *install-playwright
   script:
-    # Nightly: the complete test set without any tag filter.
+    # Nightly on shared runners: complete test set except the @ui scenarios
+    # (those run in the self-hosted "ui" job above).
     - dotnet test ShopGuard -c Release
+        --filter "TestCategory!=ui"
         --logger "junit;LogFilePath=$CI_PROJECT_DIR/ShopGuard/TestResults/regression.junit.xml"
   artifacts: *e2e-artifacts
 

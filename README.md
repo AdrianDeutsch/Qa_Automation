@@ -40,16 +40,22 @@ Eine GitLab-Pipeline führt Unit-, Smoke-, Feature- und Regression-Suiten tag-ba
 
 | Feature | Status | Technologie |
 |---|---|---|
-| ✅ UI-E2E-Tests (11 Szenarien) | grün | Playwright für .NET, Page Object Model |
-| ✅ API-Tests (14 Szenarien) | grün | Typisierter `HttpClient`-Client gegen restful-booker |
-| ✅ Unit-Tests (49 Tests, < 1 s) | grün | NUnit 4 + Moq, gemockter `HttpMessageHandler` |
-| ✅ SQL-Validierung (2 Szenarien) | grün | SQLite + Dapper, ANSI-kompatibles Schema |
+| ✅ UI-E2E-Tests (11 Szenarien) | grün (lokal) | Playwright für .NET, Page Object Model |
+| ✅ API-Tests (14 Szenarien) | grün (CI) | Typisierter `HttpClient`-Client gegen restful-booker |
+| ✅ Unit-Tests (49 Tests, < 1 s) | grün (CI) | NUnit 4 + Moq, gemockter `HttpMessageHandler` |
+| ✅ SQL-Validierung (2 Szenarien) | grün (CI) | SQLite + Dapper, ANSI-kompatibles Schema |
 | ✅ Code Coverage ≥ 80 % | 99,6 % | Coverlet + ReportGenerator |
-| ✅ CI/CD mit Tag-Selektion | bereit | GitLab CI, 6 Stages, Fail-Fast-Testpyramide |
+| ✅ CI/CD mit Tag-Selektion | live | GitHub Actions (+ `.gitlab-ci.yml`), Fail-Fast-Testpyramide |
 | ✅ Screenshots + Traces bei Fehlern | aktiv | Playwright Tracing, CI-Artefakte |
 
-**Testziele:** UI gegen den [Toolshop](https://practicesoftwaretesting.com) (automatisierungsfreundlich, stabile `data-test`-Attribute), API gegen [restful-booker](https://restful-booker.herokuapp.com).
-*Hinweis: Ursprünglich war demo.nopcommerce.com vorgesehen — die Seite blockiert Automatisierung inzwischen per Cloudflare-Challenge (auch headed). Details im Architektur-Abschnitt.*
+**Testziele:** UI gegen den [Toolshop](https://practicesoftwaretesting.com) (stabile `data-test`-Attribute),
+API gegen [restful-booker](https://restful-booker.herokuapp.com).
+
+> **Hinweis zur CI-Ausführung:** Beide Demo-Shops (ursprünglich demo.nopcommerce.com, jetzt der Toolshop)
+> sind durch eine **Cloudflare-Bot-Challenge** geschützt, die bei Datacenter-IPs (GitHub-Hosted-Runner)
+> auslöst. Die **UI-Tests laufen daher lokal bzw. auf einem Self-hosted-Runner** mit Wohn-IP und sind in
+> der Hosted-CI per `TestCategory!=ui` ausgeklammert. Unit-, API- und DB-Tests laufen vollständig in der
+> Hosted-CI. Das Umgehen des Bot-Schutzes ist bewusst nicht Teil des Frameworks.
 
 ---
 
@@ -180,10 +186,11 @@ beigelegt und sofort einsetzbar. Beide bilden dieselbe Fail-Fast-Testpyramide ab
 
 | Job / Stage | Trigger | Inhalt | Besonderheit |
 |---|---|---|---|
-| `unit` | jeder Push | 49 Unit-Tests + Coverage | **Fail Fast** — rot ⇒ kein Browserstart |
-| `smoke` | jeder Push | `--filter TestCategory=smoke` | `needs: unit`, Timeout, Retry bei Flakiness |
-| `e2e` / `feature` | Pull / Merge Request | alle `@ui`/`@api`/`@db`-Szenarien | Screenshots/Traces als Artefakte |
-| `regression` | nightly Schedule (02:00 UTC) | kompletter Testsatz | inkl. Unit + E2E |
+| `unit` | jeder Push | 49 Unit-Tests + Coverage | **Fail Fast** — rot ⇒ nichts läuft weiter |
+| `smoke` | jeder Push | `TestCategory=smoke&TestCategory!=ui` (API) | `needs: unit`, Timeout, Retry bei Flakiness |
+| `e2e` / `feature` | Pull / Merge Request | `@api` + `@db` | Screenshots/Traces als Artefakte |
+| `ui` (GitLab) | MR / nightly, **Self-hosted** | `@ui`-Szenarien | Wohn-IP umgeht Cloudflare, `allow_failure` |
+| `regression` | nightly Schedule (02:00 UTC) | kompletter Satz `TestCategory!=ui` | inkl. Unit + API + DB |
 | Coverage | jeder Push | Cobertura → Job-Summary (Actions) / Pages (GitLab) | ReportGenerator |
 
 </details>
