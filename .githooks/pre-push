@@ -32,9 +32,20 @@ docker compose -f "$COMPOSE" up -d >/dev/null
 echo "pre-push: waiting for the API..."
 for _ in $(seq 1 60); do curl -fsS http://localhost:8091/status >/dev/null 2>&1 && break || sleep 5; done
 
-if ! curl -fsS http://localhost:8091/products 2>/dev/null | grep -q '"data"'; then
-  echo "pre-push: seeding the database..."
-  docker compose -f "$COMPOSE" exec -T laravel-api php artisan migrate:fresh --seed --force >/dev/null
+# Seed until the catalog actually contains products. The DB may not be ready the
+# instant the API answers (especially on a freshly created stack), so retry —
+# '"data":[{' requires at least one product, not just an empty "data":[] array.
+has_products() { curl -fsS http://localhost:8091/products 2>/dev/null | grep -q '"data":\[{'; }
+echo "pre-push: seeding the database..."
+for _ in $(seq 1 6); do
+  has_products && break
+  docker compose -f "$COMPOSE" exec -T laravel-api php artisan migrate:fresh --seed --force >/dev/null 2>&1 || true
+  sleep 5
+done
+if ! has_products; then
+  echo "pre-push: the Toolshop database has no products after seeding — aborting."
+  echo "          Inspect with: docker compose -f docker/toolshop.compose.yml logs"
+  exit 1
 fi
 
 echo "pre-push: waiting for the UI..."
