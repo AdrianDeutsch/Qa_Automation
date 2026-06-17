@@ -8,13 +8,18 @@ namespace ShopGuard.Core.Helpers;
 /// </summary>
 public static class TestDataGenerator
 {
+    // Process-wide monotonic counter so suffixes are unique even when many are
+    // requested within the same millisecond (a plain timestamp + random number
+    // can collide under the birthday paradox).
+    private static int _sequence;
+
     /// <summary>Creates a unique e-mail address on a test-reserved domain.</summary>
     public static string UniqueEmail(string prefix = "shopguard")
         => $"{prefix}.{UniqueSuffix()}@example.com";
 
-    /// <summary>Creates a unique alphanumeric identifier, e.g. for first names or order numbers.</summary>
+    /// <summary>Creates a guaranteed-unique alphanumeric identifier (timestamp + atomic counter).</summary>
     public static string UniqueSuffix()
-        => $"{DateTime.UtcNow:yyyyMMddHHmmss}{Random.Shared.Next(1000, 9999)}";
+        => $"{DateTime.UtcNow:yyyyMMddHHmmssfff}{Interlocked.Increment(ref _sequence)}";
 
     /// <summary>Creates a valid default booking with a stay in the future.</summary>
     public static Booking DefaultBooking(string? firstName = null)
