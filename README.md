@@ -45,10 +45,12 @@ self-hosted instance of the shop — and the results are published as a clickabl
 
 ## ⭐ Highlights
 
-- **Full test pyramid runs green in cloud CI** — 49 unit tests, 16 API/DB scenarios, 11 UI scenarios.
-- **UI E2E runs in the cloud, not just locally** — a nightly/on-demand CI job spins the shop up via
-  Docker, builds it, and runs the full Playwright suite against it, side-stepping the Cloudflare bot-wall
-  on the public demo (no bot-evasion). The fast push pipeline stays green in ~1–2 minutes.
+- **Full test pyramid** — 49 unit tests, 16 API/DB scenarios, 11 UI scenarios.
+- **UI E2E gated by a git hook** — the [`pre-push`](.githooks/pre-push) hook runs the full Playwright
+  suite against a **self-hosted Toolshop** before every push. This is the deliberate fix for an upstream
+  constraint: the public demo is Cloudflare-protected and the self-hostable images are arm64-only, so the
+  suite runs where it works (the dev machine) instead of being faked in the cloud (no bot-evasion).
+- **Fast, always-green push pipeline** — hosted CI runs unit + API + DB + report in ~1–2 minutes.
 - **99.6 % line coverage** on the reusable core, enforced and reported every push.
 - **Clickable live documentation** (BDD scenarios + coverage) auto-deployed to GitHub Pages.
 - **Fail-fast pyramid**: unit tests gate everything; no browser starts if they are red.
@@ -60,7 +62,7 @@ self-hosted instance of the shop — and the results are published as a clickabl
 
 | Area | Status | Technology |
 |---|---|---|
-| ✅ UI E2E tests (11 scenarios) | green (nightly CI + local) | Playwright for .NET, Page Object Model |
+| ✅ UI E2E tests (11 scenarios) | green (local `pre-push` gate) | Playwright for .NET, Page Object Model |
 | ✅ API tests (14 scenarios) | green in CI | Typed `HttpClient` client against restful-booker |
 | ✅ Unit tests (49 tests, < 1 s) | green in CI | NUnit 4 + Moq, mocked `HttpMessageHandler` |
 | ✅ SQL validation (2 scenarios) | green in CI | SQLite + Dapper, ANSI-compatible schema |
@@ -105,11 +107,11 @@ living documentation + the full coverage report, refreshed on every push to `mai
 <br><em>Coverage report (ReportGenerator): 99.6 % line coverage for ShopGuard.Core</em>
 
 <img src="docs/images/pipeline-green.png" width="700" alt="GitHub Actions pipeline">
-<br><em>Green CI pipeline (GitHub Actions): unit → API + UI → Pages, fail-fast pyramid</em>
+<br><em>Green CI pipeline (GitHub Actions): unit → API + DB → Pages, fail-fast pyramid</em>
 
-> On a failed UI scenario the pipeline uploads a full-page **screenshot** and a **Playwright trace**
-> as job artifacts (open with `playwright show-trace <trace.zip>`). Defect reports following a Jira
-> template live in [docs/defects/](docs/defects/).
+> On a failed UI scenario the run captures a full-page **screenshot** and a **Playwright trace**
+> (open with `playwright show-trace <trace.zip>`). Defect reports following a Jira template live in
+> [docs/defects/](docs/defects/).
 
 ---
 
@@ -140,6 +142,11 @@ living documentation + the full coverage report, refreshed on every push to `mai
    SHOPGUARD_ENV=selfhosted dotnet test ShopGuard/ShopGuard.E2ETests --filter "TestCategory=ui"
    ```
    Watch the browser live with `HEADLESS=false`.
+6. **Enable the UI quality gate** (runs the suite above automatically before every push):
+   ```bash
+   git config core.hooksPath .githooks
+   ```
+   Bypass once when needed with `SKIP_UI_TESTS=1 git push`.
 
 ---
 
@@ -159,31 +166,38 @@ flowchart TB
 
 | Tag | Meaning | Where it runs |
 |---|---|---|
-| `@smoke` | critical path, fast | every push |
-| `@ui` / `@api` / `@db` | layer selection | every push / PR |
-| `@regression` | full set | nightly schedule |
-| `@e2e` | complete order flow | PR + nightly |
+| `@api` / `@db` | API + database layer | hosted CI, every push & PR |
+| `@ui` | Playwright UI layer | local `pre-push` hook (self-hosted shop) |
+| `@smoke` | critical path, fast | filter for a quick local/CI subset |
+| `@e2e` | complete order flow (login → checkout) | part of `@ui` |
 | `@wip` | in progress / unstable ([FLAKY-TESTS.md](FLAKY-TESTS.md)) | nowhere |
 
 ---
 
-## 🐳 Running UI tests in CI (self-hosted shop)
+## 🐳 UI tests: self-hosted shop + local git hook
 
-Both public demo shops (originally demo.nopcommerce.com, now the Toolshop) sit behind a **Cloudflare
-bot challenge** that triggers for data-center IPs such as GitHub-hosted runners. Instead of evading
-the protection, the pipeline **hosts the shop itself**: [docker/toolshop.compose.yml](docker/toolshop.compose.yml)
-brings up the Toolshop's prebuilt images (Angular UI + Laravel API + MariaDB), seeds the database, and
-the UI tests run against `http://localhost:4200` via the `selfhosted` environment.
+The UI suite needs a running shop, but neither demo shop can be driven from hosted CI:
 
-Two CI-specific details make this reliable: the shop is served as a **production build** (the Vite dev
-server recompiles per request and is too slow on CI), and the job runs on a **native arm64 runner**
-(`ubuntu-24.04-arm`) because the Toolshop images are arm64 — on amd64 runners they fall back to slow QEMU
-emulation and the API times out. Because the in-container build takes time, this job runs **nightly and on
-demand** (`workflow_dispatch`) rather than on every push, so the push pipeline stays green in ~1–2 minutes.
-Locally you can run the UI suite any time with the Quick-start commands above.
+- the **public** Toolshop (and the original demo.nopcommerce.com) sits behind a **Cloudflare bot
+  challenge** that triggers for data-center IPs, and
+- the **self-hostable** Toolshop images are **arm64-only** — on amd64 GitHub runners the API container
+  fails with `exec format error`, so the app never gets its data.
 
-This is the same pattern you'd use for a real product: test against a disposable, seeded instance you
-control — deterministic data, no external flakiness, no third-party rate limits.
+Rather than evade the bot protection or fight emulation, the UI suite runs **where it works — the developer
+machine** (arm64-native, or any host that can run the images), via a git **`pre-push` hook**:
+
+```bash
+git config core.hooksPath .githooks   # enable once
+```
+
+On every `git push`, [`.githooks/pre-push`](.githooks/pre-push) starts the self-hosted Toolshop
+([docker/toolshop.compose.yml](docker/toolshop.compose.yml) — Angular UI + Laravel API + MariaDB), seeds
+the database, and runs the `@ui` scenarios against `http://localhost:4200` (the `selfhosted` environment).
+A red suite blocks the push; bypass deliberately with `SKIP_UI_TESTS=1 git push`. The hosted CI stays
+fast and green with unit + API + DB + report.
+
+This mirrors how you'd test a real product: against a disposable, seeded instance you control —
+deterministic data, no external flakiness, no third-party rate limits.
 
 ---
 
@@ -205,7 +219,8 @@ Qa_Automation/
 │       ├── Support/             # Settings, PlaywrightDriver, ScenarioState
 │       └── reqnroll.json
 ├── playwright-ts/               # Bonus: UI scenarios ported to Playwright Test (TypeScript)
-├── docker/toolshop.compose.yml  # Self-hosted shop under test (for UI in CI)
+├── docker/toolshop.compose.yml  # Self-hosted shop under test (for the UI suite)
+├── .githooks/pre-push           # Local UI E2E quality gate (run before every push)
 ├── docs/
 │   ├── defects/                 # Defect reports following a Jira template
 │   ├── JIRA-BUG-TEMPLATE.md
@@ -227,11 +242,10 @@ The pipeline runs live on **GitHub Actions** ([ci.yml](.github/workflows/ci.yml)
 
 | Job | Trigger | Content | Notes |
 |---|---|---|---|
-| `unit` | every push | 49 unit tests + coverage | **fail-fast** — red ⇒ nothing else runs |
+| `unit` | every push / PR | 49 unit tests + coverage | **fail-fast** — red ⇒ nothing else runs |
 | `api` | needs unit | `@api` + `@db` | restful-booker + SQLite, retry on flakiness |
-| `ui` | nightly + manual | `@ui` via self-hosted Toolshop | Docker compose + prod build (~15–20 min) |
 | `pages` | push to `main` | Living doc + coverage → GitHub Pages | published report |
-| `regression` (GitLab) | nightly | full set | scheduled |
+| `pre-push` hook (local) | every `git push` | `@ui` via self-hosted Toolshop | runs where arm64 images work; see above |
 
 </details>
 

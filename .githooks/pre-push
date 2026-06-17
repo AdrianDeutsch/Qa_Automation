@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#
+# Local quality gate: run the Playwright UI E2E suite before every push.
+#
+# Why a git hook instead of cloud CI? The UI suite needs the demo shop running,
+# but the public site is Cloudflare-protected and the self-hostable Toolshop
+# images are arm64-only (they fail with "exec format error" on the amd64 hosted
+# runners). The tests run reliably on a developer machine (arm64, native), so we
+# gate them here. The hosted CI keeps running unit + API + DB + report.
+#
+# Bypass when you really need to (e.g. no Docker at hand):
+#   SKIP_UI_TESTS=1 git push
+set -euo pipefail
+
+if [ "${SKIP_UI_TESTS:-0}" = "1" ]; then
+  echo "pre-push: SKIP_UI_TESTS=1 set — skipping UI E2E."
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+COMPOSE="$ROOT/docker/toolshop.compose.yml"
+
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  echo "pre-push: Docker is not available — cannot run the UI E2E gate."
+  echo "          Start Docker, or bypass once with: SKIP_UI_TESTS=1 git push"
+  exit 1
+fi
+
+echo "pre-push: starting the self-hosted Toolshop (reused if already up)..."
+docker compose -f "$COMPOSE" up -d >/dev/null
+
+echo "pre-push: waiting for the API..."
+for _ in $(seq 1 60); do curl -fsS http://localhost:8091/status >/dev/null 2>&1 && break || sleep 5; done
+
+if ! curl -fsS http://localhost:8091/products 2>/dev/null | grep -q '"data"'; then
+  echo "pre-push: seeding the database..."
+  docker compose -f "$COMPOSE" exec -T laravel-api php artisan migrate:fresh --seed --force >/dev/null
+fi
+
+echo "pre-push: waiting for the UI..."
+for _ in $(seq 1 90); do curl -fsS http://localhost:4200 >/dev/null 2>&1 && break || sleep 5; done
+
+echo "pre-push: running UI E2E (@ui) against the local Toolshop..."
+SHOPGUARD_ENV=selfhosted HEADLESS=true \
+  dotnet test "$ROOT/ShopGuard/ShopGuard.E2ETests" -c Debug --filter "TestCategory=ui"
+
+echo "pre-push: UI E2E passed — proceeding with push."
