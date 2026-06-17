@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/AdrianDeutsch/Qa_Automation/actions/workflows/ci.yml"><img src="https://github.com/AdrianDeutsch/Qa_Automation/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/coverage-99.6%25-brightgreen" alt="Coverage 99.6%">
+  <a href="https://adriandeutsch.github.io/Qa_Automation/"><img src="https://img.shields.io/badge/live%20report-Pages-blue?logo=github" alt="Live report"></a>
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512BD4?logo=dotnet" alt=".NET 10">
   <img src="https://img.shields.io/badge/Reqnroll-3.3-2aa889" alt="Reqnroll">
   <img src="https://img.shields.io/badge/Playwright-1.60-2EAD33?logo=playwright" alt="Playwright">
@@ -12,216 +13,237 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/hero-demo.gif" alt="Playwright-Testlauf: Login → Suche → Warenkorb → Checkout" width="700">
-  <br><em>E2E-Lauf in Aktion: Login → Produktsuche → Warenkorb → Checkout mit Bestellbestätigung</em>
+  <img src="docs/images/hero-demo.gif" alt="Playwright run: login → search → cart → checkout" width="700">
+  <br><em>A real end-to-end run: login → product search → cart → checkout with order confirmation</em>
 </p>
 
-**ShopGuard** ist ein BDD-Test-Automation-Framework für einen Demo-Webshop und eine REST API.
-Es kombiniert Gherkin-Szenarien (Reqnroll) mit Playwright-UI-Tests, typisierten API-Tests und SQL-Datenbank-Validierung.
-Eine GitLab-Pipeline führt Unit-, Smoke-, Feature- und Regression-Suiten tag-basiert und fail-fast aus.
+**ShopGuard** is a behaviour-driven test-automation framework for a demo web shop and a REST API.
+It combines Gherkin scenarios (Reqnroll) with Playwright UI tests, a typed API client and SQL database
+validation. Every layer runs **green in CI** — including the full UI suite, executed against a
+self-hosted instance of the shop — and the results are published as a clickable
+[**live report**](https://adriandeutsch.github.io/Qa_Automation/).
+
+> 🇩🇪 The Gherkin scenarios are written in German (the project's domain language); all code and comments are in English.
 
 ---
 
-## 📑 Inhaltsverzeichnis
+## 📑 Table of contents
 
+- [Highlights](#-highlights)
 - [Features](#-features)
-- [Architektur](#-architektur)
-- [Screenshots](#-screenshots)
-- [Quick Start](#-quick-start)
-- [Teststrategie](#-teststrategie)
-- [Ordnerstruktur](#-ordnerstruktur)
-- [CI/CD-Pipeline](#-cicd-pipeline)
-- [Defect-Management](#-defect-management)
-- [Bonus: Playwright mit TypeScript](#-bonus-playwright-mit-typescript)
+- [Architecture](#-architecture)
+- [Live reports & screenshots](#-live-reports--screenshots)
+- [Quick start](#-quick-start)
+- [Test strategy](#-test-strategy)
+- [Running UI tests in CI (self-hosted shop)](#-running-ui-tests-in-ci-self-hosted-shop)
+- [Project structure](#-project-structure)
+- [CI/CD pipeline](#-cicd-pipeline)
+- [Defect management](#-defect-management)
+- [Bonus: Playwright with TypeScript](#-bonus-playwright-with-typescript)
+
+---
+
+## ⭐ Highlights
+
+- **Full test pyramid, all green in cloud CI** — 49 unit tests, 16 API/DB scenarios, 11 UI scenarios.
+- **UI E2E runs in CI for real** — the shop is spun up via Docker and tested locally in the pipeline,
+  side-stepping the Cloudflare bot-wall on the public demo (no bot-evasion).
+- **99.6 % line coverage** on the reusable core, enforced and reported every push.
+- **Clickable live documentation** (BDD scenarios + coverage) auto-deployed to GitHub Pages.
+- **Fail-fast pyramid**: unit tests gate everything; no browser starts if they are red.
+- **Failure forensics**: screenshot + Playwright trace captured automatically and uploaded as CI artifacts.
 
 ---
 
 ## ✨ Features
 
-| Feature | Status | Technologie |
+| Area | Status | Technology |
 |---|---|---|
-| ✅ UI-E2E-Tests (11 Szenarien) | grün (lokal) | Playwright für .NET, Page Object Model |
-| ✅ API-Tests (14 Szenarien) | grün (CI) | Typisierter `HttpClient`-Client gegen restful-booker |
-| ✅ Unit-Tests (49 Tests, < 1 s) | grün (CI) | NUnit 4 + Moq, gemockter `HttpMessageHandler` |
-| ✅ SQL-Validierung (2 Szenarien) | grün (CI) | SQLite + Dapper, ANSI-kompatibles Schema |
-| ✅ Code Coverage ≥ 80 % | 99,6 % | Coverlet + ReportGenerator |
-| ✅ CI/CD mit Tag-Selektion | live | GitHub Actions (+ `.gitlab-ci.yml`), Fail-Fast-Testpyramide |
-| ✅ Screenshots + Traces bei Fehlern | aktiv | Playwright Tracing, CI-Artefakte |
+| ✅ UI E2E tests (11 scenarios) | green in CI | Playwright for .NET, Page Object Model |
+| ✅ API tests (14 scenarios) | green in CI | Typed `HttpClient` client against restful-booker |
+| ✅ Unit tests (49 tests, < 1 s) | green in CI | NUnit 4 + Moq, mocked `HttpMessageHandler` |
+| ✅ SQL validation (2 scenarios) | green in CI | SQLite + Dapper, ANSI-compatible schema |
+| ✅ Code coverage ≥ 80 % | 99.6 % | Coverlet + ReportGenerator |
+| ✅ CI/CD with tag selection | live | GitHub Actions (+ portable `.gitlab-ci.yml`) |
+| ✅ Living documentation + coverage | published | GitHub Pages |
+| ✅ Screenshots + traces on failure | active | Playwright tracing, CI artifacts |
 
-**Testziele:** UI gegen den [Toolshop](https://practicesoftwaretesting.com) (stabile `data-test`-Attribute),
-API gegen [restful-booker](https://restful-booker.herokuapp.com).
-
-> **Hinweis zur CI-Ausführung:** Beide Demo-Shops (ursprünglich demo.nopcommerce.com, jetzt der Toolshop)
-> sind durch eine **Cloudflare-Bot-Challenge** geschützt, die bei Datacenter-IPs (GitHub-Hosted-Runner)
-> auslöst. Die **UI-Tests laufen daher lokal bzw. auf einem Self-hosted-Runner** mit Wohn-IP und sind in
-> der Hosted-CI per `TestCategory!=ui` ausgeklammert. Unit-, API- und DB-Tests laufen vollständig in der
-> Hosted-CI. Das Umgehen des Bot-Schutzes ist bewusst nicht Teil des Frameworks.
+**Targets:** UI against the [Toolshop](https://practicesoftwaretesting.com) (stable `data-test` selectors),
+API against [restful-booker](https://restful-booker.herokuapp.com).
 
 ---
 
-## 🏗 Architektur
+## 🏗 Architecture
 
 ```mermaid
 flowchart LR
-  A[Gherkin Features\n.feature, DE] --> B[Step Definitions\nReqnroll + NUnit]
-  B --> C[Page Objects]
-  B --> D[BookingApiClient\nShopGuard.Core]
-  B --> E[OrderRepository\nShopGuard.Core]
-  C --> F[Playwright\nChromium]
-  D --> G[restful-booker API]
-  E --> H[(SQLite\nOrders)]
-  I[Hooks\nScreenshot + Trace bei Fehlern] -.-> F
+  A["Gherkin features<br/>(.feature, DE)"] --> B["Step definitions<br/>Reqnroll + NUnit"]
+  B --> C["Page objects"]
+  B --> D["BookingApiClient<br/>ShopGuard.Core"]
+  B --> E["OrderRepository<br/>ShopGuard.Core"]
+  C --> F["Playwright<br/>Chromium"]
+  D --> G["restful-booker API"]
+  E --> H["(SQLite Orders)"]
+  I["Hooks: screenshot + trace on failure"] -.-> F
 ```
 
-Wiederverwendbare Logik (API-Client, Preisberechnung, Testdaten-Generator, Config-Loader, Order-Repository)
-liegt in `ShopGuard.Core` und ist vollständig unit-getestet — die E2E-Schicht bleibt dünn.
+Reusable logic (API client, price calculation, test-data generator, config loader, order repository)
+lives in `ShopGuard.Core` and is fully unit-tested — the E2E layer stays thin.
 
 ---
 
-## 📸 Screenshots
+## 📊 Live reports & screenshots
 
-<img src="docs/images/coverage-report.png" width="700" alt="Coverage-Report">
-<br><em>Coverage-Report (ReportGenerator): 99,6 % Line Coverage für ShopGuard.Core</em>
+**▶ Live report (GitHub Pages):** https://adriandeutsch.github.io/Qa_Automation/ — browsable BDD
+living documentation + the full coverage report, refreshed on every push to `main`.
 
-<img src="docs/images/pipeline-green.png" width="700" alt="GitHub Actions Pipeline">
-<br><em>Grüne CI-Pipeline (GitHub Actions): Unit → Smoke, Fail-Fast-Testpyramide</em>
+<img src="docs/images/coverage-report.png" width="700" alt="Coverage report">
+<br><em>Coverage report (ReportGenerator): 99.6 % line coverage for ShopGuard.Core</em>
 
-> Weitere Live-Artefakte direkt im <a href="https://github.com/AdrianDeutsch/Qa_Automation/actions">Actions-Tab</a>:
-> Coverage-Summary im Job-Step-Summary, sowie Screenshots & Playwright-Traces als Job-Artefakte bei
-> fehlgeschlagenen E2E-Läufen (öffnen mit `playwright show-trace <trace.zip>`).
-> Defect Reports nach Jira-Template liegen unter [docs/defects/](docs/defects/).
+<img src="docs/images/pipeline-green.png" width="700" alt="GitHub Actions pipeline">
+<br><em>Green CI pipeline (GitHub Actions): unit → API + UI → Pages, fail-fast pyramid</em>
+
+> On a failed UI scenario the pipeline uploads a full-page **screenshot** and a **Playwright trace**
+> as job artifacts (open with `playwright show-trace <trace.zip>`). Defect reports following a Jira
+> template live in [docs/defects/](docs/defects/).
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick start
 
-1. **Repository klonen und bauen**
+1. **Clone & build**
    ```bash
    git clone https://github.com/AdrianDeutsch/Qa_Automation.git && cd Qa_Automation
    dotnet build ShopGuard
    ```
-2. **Playwright-Browser installieren** (einmalig)
+2. **Install the Playwright browser** (once)
    ```bash
    dotnet tool install --global Microsoft.Playwright.CLI
-   playwright install chromium
+   pwsh ShopGuard/ShopGuard.E2ETests/bin/Debug/net10.0/playwright.ps1 install chromium
    ```
-3. **Unit-Tests ausführen** (< 1 Sekunde)
+3. **Run the unit tests** (< 1 second)
    ```bash
    dotnet test ShopGuard/ShopGuard.UnitTests
    ```
-4. **Smoke-Suite ausführen** (UI + API, ~1 Minute)
+4. **Run the API + DB suite**
    ```bash
-   dotnet test ShopGuard/ShopGuard.E2ETests --filter "TestCategory=smoke"
+   dotnet test ShopGuard/ShopGuard.E2ETests --filter "TestCategory=api|TestCategory=db"
    ```
-5. **Headed zusehen** (Browser sichtbar)
+5. **Run the UI suite** against your own Toolshop (no Cloudflare):
    ```bash
-   HEADLESS=false dotnet test ShopGuard/ShopGuard.E2ETests --filter "TestCategory=ui"
+   docker compose -f docker/toolshop.compose.yml up -d
+   docker compose -f docker/toolshop.compose.yml exec -T laravel-api php artisan migrate:fresh --seed --force
+   SHOPGUARD_ENV=selfhosted dotnet test ShopGuard/ShopGuard.E2ETests --filter "TestCategory=ui"
    ```
-
-Umgebung wechseln: `SHOPGUARD_ENV=staging` (Overrides in [appsettings.test.json](ShopGuard/ShopGuard.E2ETests/appsettings.test.json)).
+   Watch the browser live with `HEADLESS=false`.
 
 ---
 
-## 🎯 Teststrategie
+## 🎯 Test strategy
 
 ```mermaid
 flowchart TB
-  subgraph Pyramide
-    UI["🖥 UI-E2E — 11 Szenarien\nlangsam, höchste Aussagekraft"]
-    API["🔌 API + DB — 16 Szenarien\nschnell, Contract & Persistenz"]
-    UNIT["⚙️ Unit — 49 Tests\n< 1 s, blockiert alles bei Rot"]
+  subgraph Pyramid
+    UI["🖥 UI E2E — 11 scenarios<br/>slow, highest fidelity"]
+    API["🔌 API + DB — 16 scenarios<br/>fast, contract & persistence"]
+    UNIT["⚙️ Unit — 49 tests<br/>< 1 s, gates everything"]
   end
   UNIT --> API --> UI
 ```
 
-**Tagging-Konzept** (Reqnroll-Tags → NUnit-Kategorien → `--filter "TestCategory=..."`):
+**Tagging** (Reqnroll tags → NUnit categories → `--filter "TestCategory=..."`):
 
-| Tag | Bedeutung | Läuft in Stage |
+| Tag | Meaning | Where it runs |
 |---|---|---|
-| `@smoke` | kritischer Pfad, max. 5 min | `smoke` (jeder Push) |
-| `@ui` / `@api` / `@db` | Schicht-Auswahl | `feature` (Merge Requests) |
-| `@regression` | kompletter Testsatz | `regression` (nightly Schedule) |
-| `@e2e` | kompletter Bestellfluss | `feature` + `regression` |
-| `@wip` | in Arbeit / instabil ([FLAKY-TESTS.md](FLAKY-TESTS.md)) | nirgends |
+| `@smoke` | critical path, fast | every push |
+| `@ui` / `@api` / `@db` | layer selection | every push / PR |
+| `@regression` | full set | nightly schedule |
+| `@e2e` | complete order flow | PR + nightly |
+| `@wip` | in progress / unstable ([FLAKY-TESTS.md](FLAKY-TESTS.md)) | nowhere |
 
 ---
 
-## 📁 Ordnerstruktur
+## 🐳 Running UI tests in CI (self-hosted shop)
+
+Both public demo shops (originally demo.nopcommerce.com, now the Toolshop) sit behind a **Cloudflare
+bot challenge** that triggers for data-center IPs such as GitHub-hosted runners. Instead of evading
+the protection, the pipeline **hosts the shop itself**: [docker/toolshop.compose.yml](docker/toolshop.compose.yml)
+brings up the Toolshop's prebuilt images (Angular UI + Laravel API + MariaDB), seeds the database, and
+the UI tests run against `http://localhost:4200` via the `selfhosted` environment.
+
+This is the same pattern you'd use for a real product: test against a disposable, seeded instance you
+control — deterministic data, no external flakiness, no third-party rate limits.
+
+---
+
+## 📁 Project structure
 
 ```
 Qa_Automation/
 ├── ShopGuard/
-│   ├── ShopGuard.Core/          # Wiederverwendbar: ApiClient, Helper, Models, OrderRepository
-│   ├── ShopGuard.UnitTests/     # 49 NUnit-Tests, Moq-gemockter HttpMessageHandler
+│   ├── ShopGuard.Core/          # Reusable: ApiClient, helpers, models, OrderRepository
+│   ├── ShopGuard.UnitTests/     # 49 NUnit tests, Moq-mocked HttpMessageHandler
 │   └── ShopGuard.E2ETests/
 │       ├── Features/
-│       │   ├── UI/              # Login, Warenkorb, Suche, Checkout (Gherkin, DE)
-│       │   └── API/             # Buchungs-CRUD, Auth, Negativtests, DB-Validierung
-│       ├── StepDefinitions/     # Bindings, dünn — Logik liegt in Pages/Core
-│       ├── Pages/               # Page Object Model (data-test-Selektoren)
-│       ├── Database/            # SQL-Schema + scenario-scoped DB-Kontext
-│       ├── Hooks/               # Browser-Lifecycle, Screenshot + Trace bei Fehlern
+│       │   ├── UI/              # Login, cart, search, checkout (Gherkin, DE)
+│       │   └── API/             # Booking CRUD, auth, negative tests, DB validation
+│       ├── StepDefinitions/     # Bindings — thin, logic lives in Pages/Core
+│       ├── Pages/               # Page Object Model (data-test selectors)
+│       ├── Database/            # SQL schema + scenario-scoped DB context
+│       ├── Hooks/               # Browser lifecycle, screenshot + trace on failure
 │       ├── Support/             # Settings, PlaywrightDriver, ScenarioState
 │       └── reqnroll.json
-├── playwright-ts/               # Bonus: 3 UI-Szenarien in Playwright Test (TypeScript)
+├── playwright-ts/               # Bonus: UI scenarios ported to Playwright Test (TypeScript)
+├── docker/toolshop.compose.yml  # Self-hosted shop under test (for UI in CI)
 ├── docs/
-│   ├── defects/                 # 3 Defect Reports nach Jira-Template
+│   ├── defects/                 # Defect reports following a Jira template
 │   ├── JIRA-BUG-TEMPLATE.md
 │   └── images/
-├── FLAKY-TESTS.md               # Erkennung & Behandlung instabiler Tests
-├── .github/workflows/ci.yml     # Live-Pipeline (GitHub Actions), Fail-Fast-Testpyramide
-└── .gitlab-ci.yml               # Gleichwertige GitLab-Variante (Stages, Tags, Pages)
+├── FLAKY-TESTS.md               # Detecting & handling flaky tests
+├── .github/workflows/ci.yml     # Live pipeline (GitHub Actions)
+└── .gitlab-ci.yml               # Equivalent GitLab variant (stages, tags, Pages)
 ```
 
 ---
 
-## 🔁 CI/CD-Pipeline
+## 🔁 CI/CD pipeline
 
-Die Pipeline läuft live als **GitHub Actions** ([ci.yml](.github/workflows/ci.yml)) — die
-**[.gitlab-ci.yml](.gitlab-ci.yml)** ist als gleichwertige GitLab-Variante (Stages, Tags, GitLab Pages)
-beigelegt und sofort einsetzbar. Beide bilden dieselbe Fail-Fast-Testpyramide ab:
+The pipeline runs live on **GitHub Actions** ([ci.yml](.github/workflows/ci.yml)); a fully equivalent
+**[.gitlab-ci.yml](.gitlab-ci.yml)** (stages, tag selection, GitLab Pages) ships alongside it.
 
 <details>
-<summary><b>Stages & Trigger im Überblick</b> (Klick zum Aufklappen)</summary>
+<summary><b>Jobs & triggers</b> (click to expand)</summary>
 
-| Job / Stage | Trigger | Inhalt | Besonderheit |
+| Job | Trigger | Content | Notes |
 |---|---|---|---|
-| `unit` | jeder Push | 49 Unit-Tests + Coverage | **Fail Fast** — rot ⇒ nichts läuft weiter |
-| `smoke` | jeder Push | `TestCategory=smoke&TestCategory!=ui` (API) | `needs: unit`, Timeout, Retry bei Flakiness |
-| `e2e` / `feature` | Pull / Merge Request | `@api` + `@db` | Screenshots/Traces als Artefakte |
-| `ui` (GitLab) | MR / nightly, **Self-hosted** | `@ui`-Szenarien | Wohn-IP umgeht Cloudflare, `allow_failure` |
-| `regression` | nightly Schedule (02:00 UTC) | kompletter Satz `TestCategory!=ui` | inkl. Unit + API + DB |
-| Coverage | jeder Push | Cobertura → Job-Summary (Actions) / Pages (GitLab) | ReportGenerator |
+| `unit` | every push | 49 unit tests + coverage | **fail-fast** — red ⇒ nothing else runs |
+| `api` | needs unit | `@api` + `@db` | restful-booker + SQLite, retry on flakiness |
+| `ui` | needs unit | `@ui` via self-hosted Toolshop | Docker compose + seed, Playwright traces |
+| `pages` | push to `main` | Living doc + coverage → GitHub Pages | published report |
+| `regression` (GitLab) | nightly | full set | scheduled |
 
 </details>
 
-Bei fehlgeschlagenen UI-Szenarien landen **Full-Page-Screenshot** und **Playwright-Trace**
-automatisch als CI-Artefakte (`artifacts/<Szenario>.png` / `.trace.zip`) — Analyse mit:
-
-```bash
-playwright show-trace artifacts/<Szenario>.trace.zip
-```
-
 ---
 
-## 🐞 Defect-Management
+## 🐞 Defect management
 
-Drei real gefundene und dokumentierte Defects (Template: [JIRA-BUG-TEMPLATE.md](docs/JIRA-BUG-TEMPLATE.md)):
+Three real, documented defects (template: [JIRA-BUG-TEMPLATE.md](docs/JIRA-BUG-TEMPLATE.md)):
 
-| ID | Komponente | Kurzbeschreibung | Root Cause |
+| ID | Component | Summary | Root cause |
 |---|---|---|---|
-| [DEFECT-001](docs/defects/DEFECT-001.md) | API | `POST /booking` antwortet **418** statt 4xx ohne Accept-Header | Produktfehler |
-| [DEFECT-002](docs/defects/DEFECT-002.md) | API | `POST /auth` liefert **200** bei falschen Credentials | Produktfehler |
-| [DEFECT-003](docs/defects/DEFECT-003.md) | UI | Checkout blockiert: Hausnummer aus Registrierung fehlt im Profil | Produktfehler |
+| [DEFECT-001](docs/defects/DEFECT-001.md) | API | `POST /booking` returns **418** instead of 4xx without an Accept header | product bug |
+| [DEFECT-002](docs/defects/DEFECT-002.md) | API | `POST /auth` returns **200** for invalid credentials | product bug |
+| [DEFECT-003](docs/defects/DEFECT-003.md) | UI | Checkout blocked: house number from registration missing in profile | product bug |
 
-Workflow: Fehleranalyse (Trace/Logs) → Klassifikation (Produkt-/Testfehler/flaky) → Report → Workaround mit Verweis → Retest.
+Workflow: failure analysis (trace/logs) → classification (product / test / flaky) → report → fix or workaround → retest.
 
 ---
 
-## 🎁 Bonus: Playwright mit TypeScript
+## 🎁 Bonus: Playwright with TypeScript
 
-Drei UI-Szenarien sind zusätzlich in **Playwright Test (TypeScript)** portiert — gleiche
-Page-Object-Struktur, gleiche `data-test`-Selektoren:
+Selected UI scenarios are also ported to **Playwright Test (TypeScript)** — same Page Object structure,
+same `data-test` selectors:
 
 ```bash
 cd playwright-ts

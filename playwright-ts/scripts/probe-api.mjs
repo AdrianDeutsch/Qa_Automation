@@ -1,0 +1,15 @@
+import { chromium } from '@playwright/test';
+const browser = await chromium.launch();
+const page = await browser.newPage();
+const apiCalls = new Set();
+page.on('request', r => { const u = r.url(); if (/product|api|practicesoftwaretesting|:8091/.test(u)) apiCalls.add(r.method()+' '+u); });
+const failed = [];
+page.on('requestfailed', r => failed.push(r.url()+' :: '+r.failure()?.errorText));
+const responses = [];
+page.on('response', async r => { const u=r.url(); if(/products/.test(u)) responses.push(r.status()+' '+u); });
+await page.goto('http://localhost:4200', { waitUntil: 'networkidle' });
+await page.waitForTimeout(4000);
+console.log('=== API/product requests ==='); [...apiCalls].slice(0,15).forEach(x=>console.log(' ',x));
+console.log('=== product responses ==='); responses.slice(0,8).forEach(x=>console.log(' ',x));
+console.log('=== failed requests ==='); failed.slice(0,8).forEach(x=>console.log(' ',x));
+await browser.close();
